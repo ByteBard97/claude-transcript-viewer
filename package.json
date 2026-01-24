@@ -40,6 +40,9 @@
   "bugs": {
     "url": "https://github.com/varunr89/claude-transcript-viewer/issues"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
     "@types/express": "^5.0.6",
