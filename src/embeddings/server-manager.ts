@@ -44,6 +44,18 @@ export function isAppleSilicon(): boolean {
 }
 
 /**
+ * Check if running in CI environment
+ */
+export function isCI(): boolean {
+  return (
+    process.env.CI === "true" ||
+    process.env.GITHUB_ACTIONS === "true" ||
+    process.env.GITLAB_CI === "true" ||
+    process.env.CIRCLECI === "true"
+  );
+}
+
+/**
  * Check if Python 3 is available and return its path
  */
 function getPythonPath(): string | null {

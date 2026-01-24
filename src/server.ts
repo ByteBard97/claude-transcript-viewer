@@ -12,6 +12,7 @@ import {
   EmbeddingServerManager,
   createEmbeddingServer,
   isAppleSilicon,
+  isCI,
 } from "./embeddings/server-manager.js";
 import { getConfig } from "./config.js";
 import { runIndexer } from "./indexer/index.js";
@@ -272,8 +273,8 @@ async function initializeSearch() {
       // Unix socket
       embeddingClient = createEmbeddingClient(socketPath);
       console.log(`Embedding client connected to ${socketPath}`);
-    } else if (isAppleSilicon()) {
-      // Apple Silicon: try to auto-start the MLX embedding server
+    } else if (isAppleSilicon() && !isCI()) {
+      // Apple Silicon (non-CI): try to auto-start the MLX embedding server
       console.log(`Apple Silicon detected - starting MLX embedding server...`);
 
       embeddingServer = await createEmbeddingServer({
@@ -290,6 +291,9 @@ async function initializeSearch() {
         console.log(`MLX embedding server failed to start - using FTS-only search`);
         console.log(`  Run with DEBUG=true for more details`);
       }
+    } else if (isCI()) {
+      console.log(`CI environment detected - using FTS-only search`);
+      console.log(`  Set EMBED_URL to enable embeddings in CI`);
     } else {
       console.log(`Embedding server not found - using FTS-only search`);
       console.log(`  Set EMBED_URL=http://localhost:8000 for HTTP or EMBED_SOCKET for Unix socket`);
