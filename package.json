@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "type": "module",
   "bin": {
-    "claude-transcript-viewer": "./dist/server.js"
+    "claude-transcript-viewer": "dist/server.js"
   },
   "files": [
     "dist",
@@ -34,7 +34,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/varunr89/claude-transcript-viewer.git"
+    "url": "git+https://github.com/varunr89/claude-transcript-viewer.git"
   },
   "homepage": "https://github.com/varunr89/claude-transcript-viewer#readme",
   "bugs": {
