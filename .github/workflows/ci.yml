@@ -85,6 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test, test-install]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write  # Required for npm OIDC trusted publishing
 
     steps:
       - uses: actions/checkout@v4
@@ -117,6 +120,6 @@ jobs:
 
       - name: Publish to npm
         if: steps.version.outputs.changed == 'true'
-        run: npm publish
+        run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
