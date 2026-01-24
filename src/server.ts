@@ -1036,6 +1036,84 @@ app.get(/.*\.html$/, (req: Request, res: Response) => {
 // Serve static assets (CSS, JS, images) - disable index.html serving so our dynamic routes work
 app.use(express.static(ARCHIVE_DIR, { index: false }));
 
+// Search results page - MUST be before /:project/ route to avoid matching "search" as project name
+app.get("/search", async (req: Request, res: Response) => {
+  const startTime = Date.now();
+
+  try {
+    const query = (req.query.q as string) || "";
+    const options: SearchOptions = {
+      project: req.query.project as string | undefined,
+      role: req.query.role as "user" | "assistant" | undefined,
+      after: req.query.after as string | undefined,
+      before: req.query.before as string | undefined,
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 50,
+      offset: req.query.offset ? parseInt(req.query.offset as string, 10) : 0,
+    };
+
+    const db = getDatabase();
+
+    // Get list of projects for filter dropdown
+    const projects = db.prepare(`
+      SELECT DISTINCT project FROM conversations ORDER BY project
+    `).all() as Array<{ project: string }>;
+
+    let results: Array<{
+      chunk_id: number;
+      conversation_id: string;
+      project: string;
+      title: string;
+      snippet: string;
+      role: string;
+      page: number;
+      score: number;
+      url: string;
+    }> = [];
+
+    if (query) {
+      const searchResult = await searchHybrid(query, options, embeddingClient);
+
+      results = (searchResult.results || []).map((r) => {
+        const terms = query.split(/\s+/).filter(Boolean);
+        const snippet = generateSnippet(r.content, query, 150);
+        const highlightedSnippet = highlightTerms(snippet, terms);
+
+        return {
+          chunk_id: r.chunk_id,
+          conversation_id: r.conversation_id,
+          project: r.project,
+          title: r.title || "Untitled",
+          snippet: highlightedSnippet,
+          role: r.role,
+          page: r.page_number || 1,
+          score: r.score,
+          url: `/${projectToArchivePath(r.project)}/${r.conversation_id}/page-001.html`,
+        };
+      });
+    }
+
+    const html = renderSearchPage({
+      query,
+      results,
+      projects: projects.map((p) => p.project),
+      filters: {
+        project: options.project,
+        role: options.role,
+        after: options.after,
+        before: options.before,
+      },
+      queryTimeMs: Date.now() - startTime,
+      offset: options.offset || 0,
+      limit: options.limit || 50,
+    });
+
+    res.type("html").send(html);
+  } catch (err) {
+    console.error("Search page error:", err);
+    res.status(500).send("Search failed");
+  }
+});
+
 // Serve project directory index.html files (since we disabled automatic index serving)
 // Rewrite session links to go directly to page-001.html instead of session index.html
 app.get("/:project/", (req: Request, res: Response) => {
@@ -1211,84 +1289,6 @@ app.post("/api/index/reindex", async (req: Request, res: Response) => {
   startBackgroundIndexing();
 
   res.json({ status: "started", message: "Indexing started in background" });
-});
-
-// Search results page
-app.get("/search", async (req: Request, res: Response) => {
-  const startTime = Date.now();
-
-  try {
-    const query = (req.query.q as string) || "";
-    const options: SearchOptions = {
-      project: req.query.project as string | undefined,
-      role: req.query.role as "user" | "assistant" | undefined,
-      after: req.query.after as string | undefined,
-      before: req.query.before as string | undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 50,
-      offset: req.query.offset ? parseInt(req.query.offset as string, 10) : 0,
-    };
-
-    const db = getDatabase();
-
-    // Get list of projects for filter dropdown
-    const projects = db.prepare(`
-      SELECT DISTINCT project FROM conversations ORDER BY project
-    `).all() as Array<{ project: string }>;
-
-    let results: Array<{
-      chunk_id: number;
-      conversation_id: string;
-      project: string;
-      title: string;
-      snippet: string;
-      role: string;
-      page: number;
-      score: number;
-      url: string;
-    }> = [];
-
-    if (query) {
-      const searchResult = await searchHybrid(query, options, embeddingClient);
-
-      results = (searchResult.results || []).map((r) => {
-        const terms = query.split(/\s+/).filter(Boolean);
-        const snippet = generateSnippet(r.content, query, 150);
-        const highlightedSnippet = highlightTerms(snippet, terms);
-
-        return {
-          chunk_id: r.chunk_id,
-          conversation_id: r.conversation_id,
-          project: r.project,
-          title: r.title || "Untitled",
-          snippet: highlightedSnippet,
-          role: r.role,
-          page: r.page_number || 1,
-          score: r.score,
-          url: `/${projectToArchivePath(r.project)}/${r.conversation_id}/page-001.html`,
-        };
-      });
-    }
-
-    const html = renderSearchPage({
-      query,
-      results,
-      projects: projects.map((p) => p.project),
-      filters: {
-        project: options.project,
-        role: options.role,
-        after: options.after,
-        before: options.before,
-      },
-      queryTimeMs: Date.now() - startTime,
-      offset: options.offset || 0,
-      limit: options.limit || 50,
-    });
-
-    res.type("html").send(html);
-  } catch (err) {
-    console.error("Search page error:", err);
-    res.status(500).send("Search failed");
-  }
 });
 
 function renderSearchPage(data: {
