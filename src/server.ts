@@ -23,6 +23,7 @@ const PORT = process.env.PORT || 3000;
 const ARCHIVE_DIR = process.env.ARCHIVE_DIR || process.argv[2] || "./claude-archive";
 const SOURCE_DIR = process.env.SOURCE_DIR || process.argv[3] || "";
 const DATABASE_PATH = process.env.DATABASE_PATH || join(ARCHIVE_DIR, ".search.db");
+const NO_OPEN = process.argv.includes("--no-open") || process.env.NO_OPEN === "true";
 
 // Initialize database and embedding client
 let embeddingClient: EmbeddingClient | undefined;
@@ -1993,23 +1994,51 @@ function projectToArchivePath(project: string): string {
   return project;
 }
 
+// Open browser with the given URL
+function openBrowser(url: string): void {
+  const { platform } = process;
+  let command: string;
+  let args: string[];
+
+  if (platform === "darwin") {
+    command = "open";
+    args = [url];
+  } else if (platform === "win32") {
+    command = "cmd";
+    args = ["/c", "start", url];
+  } else {
+    // Linux and others
+    command = "xdg-open";
+    args = [url];
+  }
+
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+}
+
 // Initialize search on startup
 initializeSearch();
 
 app.listen(PORT, () => {
+  const url = `http://localhost:${PORT}`;
+
   console.log(`
-Claude Transcript Viewer running at http://localhost:${PORT}
+Claude Transcript Viewer running at ${url}
 
 Serving archive from: ${ARCHIVE_DIR}
 Source directory: ${SOURCE_DIR || "(not configured)"}
 
-Usage:
-  npm run dev                    # Development mode with hot reload
-  npm run dev -- /path/to/archive  # Specify archive directory
-  npm run dev -- /archive /source  # Specify both archive and source directory
-
-Open http://localhost:${PORT} to browse transcripts.
+Options:
+  --no-open  Don't auto-open browser
 `);
+
+  // Auto-open browser unless disabled
+  if (!NO_OPEN && !isCI()) {
+    openBrowser(url);
+  }
 
   // Start background archive generation and indexing after server is ready (non-blocking)
   if (SOURCE_DIR) {
