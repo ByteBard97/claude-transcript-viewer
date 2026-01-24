@@ -8,6 +8,11 @@ import { createDatabase, getDatabase, closeDatabase } from "./db/index.js";
 import { searchHybrid, searchFTS, SearchOptions } from "./api/search.js";
 import { generateSnippet, highlightTerms } from "./api/snippets.js";
 import { createEmbeddingClient, EmbeddingClient } from "./embeddings/client.js";
+import {
+  EmbeddingServerManager,
+  createEmbeddingServer,
+  isAppleSilicon,
+} from "./embeddings/server-manager.js";
 import { getConfig } from "./config.js";
 import { runIndexer } from "./indexer/index.js";
 
@@ -20,6 +25,7 @@ const DATABASE_PATH = process.env.DATABASE_PATH || join(ARCHIVE_DIR, ".search.db
 
 // Initialize database and embedding client
 let embeddingClient: EmbeddingClient | undefined;
+let embeddingServer: EmbeddingServerManager | null = null;
 
 // Background indexing state
 let indexingStatus: {
@@ -266,6 +272,24 @@ async function initializeSearch() {
       // Unix socket
       embeddingClient = createEmbeddingClient(socketPath);
       console.log(`Embedding client connected to ${socketPath}`);
+    } else if (isAppleSilicon()) {
+      // Apple Silicon: try to auto-start the MLX embedding server
+      console.log(`Apple Silicon detected - starting MLX embedding server...`);
+
+      embeddingServer = await createEmbeddingServer({
+        verbose: process.env.DEBUG === "true" || process.env.VERBOSE === "true",
+      });
+
+      if (embeddingServer && embeddingServer.status.healthy) {
+        const status = embeddingServer.status;
+        console.log(
+          `MLX embedding server started (model: ${status.model}, dim: ${status.dim})`
+        );
+        embeddingClient = createEmbeddingClient(embeddingServer.url);
+      } else {
+        console.log(`MLX embedding server failed to start - using FTS-only search`);
+        console.log(`  Run with DEBUG=true for more details`);
+      }
     } else {
       console.log(`Embedding server not found - using FTS-only search`);
       console.log(`  Set EMBED_URL=http://localhost:8000 for HTTP or EMBED_SOCKET for Unix socket`);
@@ -1993,3 +2017,21 @@ Open http://localhost:${PORT} to browse transcripts.
     }, 1000);
   }
 });
+
+// Graceful shutdown
+function shutdown() {
+  console.log("\nShutting down...");
+
+  // Stop embedding server if running
+  if (embeddingServer) {
+    embeddingServer.stop();
+  }
+
+  // Close database
+  closeDatabase();
+
+  process.exit(0);
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

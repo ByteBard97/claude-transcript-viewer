@@ -1,6 +1,6 @@
 {
   "name": "claude-transcript-viewer",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Enhanced viewer for Claude Code transcripts with dark mode, infinite scroll, message filtering, and search",
   "main": "dist/server.js",
   "type": "module",
@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "python",
     "README.md"
   ],
   "scripts": {

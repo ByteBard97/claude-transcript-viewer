@@ -1,0 +1,8 @@
+# MLX Qwen3 Embedding Server Dependencies
+# Requires Apple Silicon (M1/M2/M3/M4)
+
+mlx-lm>=0.26.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+pydantic>=2.10.0
+numpy>=2.0.0
