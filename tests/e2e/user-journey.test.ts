@@ -79,7 +79,7 @@ describe('E2E: User Journey with Real Transcripts', () => {
       mkdirSync(archiveProjectDir, { recursive: true });
     }
     console.log(`Total JSONL files: ${totalFiles}`);
-    expect(totalFiles).toBeGreaterThanOrEqual(3);
+    expect(totalFiles).toBeGreaterThanOrEqual(10);
 
     // Run indexer on fixtures
     console.log('Running indexer on fixtures...');
@@ -144,7 +144,7 @@ describe('E2E: User Journey with Real Transcripts', () => {
       }>('/api/index/status');
 
       expect(status.status).toBe('ready');
-      expect(status.conversations).toBeGreaterThanOrEqual(3);
+      expect(status.conversations).toBeGreaterThanOrEqual(10);
       expect(status.chunks).toBeGreaterThan(0);
     });
   });
@@ -153,23 +153,25 @@ describe('E2E: User Journey with Real Transcripts', () => {
     it('lists all indexed projects', async () => {
       const data = await apiJson<{ projects: string[] }>('/api/projects');
 
-      expect(data.projects).toContain('web-app');
-      expect(data.projects).toContain('api-server');
-      expect(data.projects).toContain('cli-tool');
+      expect(data.projects).toContain('podcast-summarizer');
+      expect(data.projects).toContain('edps-web');
+      expect(data.projects).toContain('tools');
     });
   });
 
   describe('Search Functionality', () => {
-    it('finds results for terms in fixtures', async () => {
-      // Use terms that appear in our synthetic fixtures
-      const result = await apiJson<{
-        type: string;
-        results?: Array<{ content: string }>;
-      }>('/api/search?q=user&limit=10');
+    it('finds results for common programming terms', async () => {
+      const terms = ['function', 'error', 'file', 'code', 'test'];
 
-      // Should return results array (may be empty if no matches)
-      expect(result.results).toBeDefined();
-      expect(Array.isArray(result.results)).toBe(true);
+      for (const term of terms) {
+        const result = await apiJson<{
+          type: string;
+          results?: Array<{ content: string }>;
+        }>(`/api/search?q=${term}&limit=5`);
+
+        // Should find at least one result for common terms in real transcripts
+        expect(result.results?.length ?? 0).toBeGreaterThan(0);
+      }
     });
 
     it('returns empty query as recent conversations', async () => {
@@ -224,11 +226,11 @@ describe('E2E: User Journey with Real Transcripts', () => {
     it('filters by project', async () => {
       const result = await apiJson<{
         results?: Array<{ project: string }>;
-      }>('/api/search?q=React&project=web-app&limit=10');
+      }>('/api/search?q=function&project=tools&limit=10');
 
       if (result.results && result.results.length > 0) {
         const allFromProject = result.results.every(r =>
-          r.project.includes('web-app')
+          r.project.includes('tools')
         );
         expect(allFromProject).toBe(true);
       }
