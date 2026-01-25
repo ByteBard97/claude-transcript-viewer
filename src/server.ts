@@ -2,7 +2,8 @@
 import express, { Request, Response } from "express";
 import { readFileSync, existsSync, readdirSync, mkdirSync, accessSync, constants } from "fs";
 import { join, dirname, resolve } from "path";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
+import { createServer } from "net";
 import * as cheerio from "cheerio";
 import { createDatabase, getDatabase, closeDatabase } from "./db/index.js";
 import { searchHybrid, searchFTS, SearchOptions } from "./api/search.js";
@@ -126,6 +127,121 @@ function validateArchiveDir(): void {
 
 // Run validation immediately
 validateArchiveDir();
+
+/**
+ * Check if a port is already in use.
+ * Returns info about the process using the port, or null if free.
+ */
+async function checkPortInUse(port: number): Promise<{ pid: number; command: string } | null> {
+  return new Promise((resolve) => {
+    const server = createServer();
+
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        // Port is in use - try to find what's using it (uses spawnSync for security)
+        try {
+          const lsofResult = spawnSync("lsof", ["-i", `:${port}`, "-t"], { encoding: "utf-8" });
+          const pid = parseInt(lsofResult.stdout.trim().split("\n")[0], 10);
+          if (pid) {
+            const psResult = spawnSync("ps", ["-p", String(pid), "-o", "args="], { encoding: "utf-8" });
+            resolve({ pid, command: psResult.stdout.trim() });
+            return;
+          }
+        } catch {
+          // lsof/ps failed - still report port in use but without details
+        }
+        resolve({ pid: 0, command: "unknown" });
+      } else {
+        resolve(null);
+      }
+    });
+
+    server.once("listening", () => {
+      server.close();
+      resolve(null);
+    });
+
+    server.listen(port);
+  });
+}
+
+/**
+ * Check if a command string looks like a claude-transcript-viewer process.
+ */
+function isTranscriptViewerProcess(command: string): boolean {
+  return command.includes("transcript-viewer") ||
+         command.includes("claude-transcript") ||
+         /server\.js.*claude-archive/.test(command);
+}
+
+/**
+ * Wait for a port to become free (with timeout).
+ */
+async function waitForPortFree(port: number, timeoutMs: number = 5000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const inUse = await checkPortInUse(port);
+    if (!inUse) return true;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+
+/**
+ * Ensure no other instance is running on the configured port.
+ * Auto-kills existing transcript-viewer instances; fails for other processes.
+ */
+async function ensureSingleInstance(): Promise<void> {
+  const portNum = typeof PORT === "string" ? parseInt(PORT, 10) : PORT;
+  const existing = await checkPortInUse(portNum);
+
+  if (!existing) return;
+
+  // If it's a transcript-viewer process, kill it automatically
+  if (existing.pid > 0 && isTranscriptViewerProcess(existing.command)) {
+    console.log(`Stopping existing instance (PID ${existing.pid})...`);
+
+    try {
+      process.kill(existing.pid, "SIGTERM");
+
+      // Wait for the port to become free
+      const freed = await waitForPortFree(portNum);
+      if (freed) {
+        console.log(`Previous instance stopped.\n`);
+        return;
+      }
+
+      // SIGTERM didn't work, try SIGKILL
+      console.log(`Process not responding, forcing shutdown...`);
+      process.kill(existing.pid, "SIGKILL");
+
+      const freedAfterKill = await waitForPortFree(portNum, 2000);
+      if (freedAfterKill) {
+        console.log(`Previous instance stopped.\n`);
+        return;
+      }
+    } catch (err) {
+      // Process might have already exited
+      const stillInUse = await checkPortInUse(portNum);
+      if (!stillInUse) return;
+    }
+  }
+
+  // Port is in use by something else (or kill failed)
+  console.error(`\nError: Port ${portNum} is already in use.`);
+
+  if (existing.pid > 0) {
+    console.error(`Process using port ${portNum}:`);
+    console.error(`  PID: ${existing.pid}`);
+    console.error(`  Command: ${existing.command}\n`);
+    console.error(`To stop it manually:`);
+    console.error(`  kill ${existing.pid}\n`);
+  }
+
+  console.error(`Or use a different port:`);
+  console.error(`  PORT=3001 npx claude-transcript-viewer ${ARCHIVE_DIR_ARG || ""}\n`);
+  process.exit(1);
+}
 
 // Initialize database and embedding client
 let embeddingClient: EmbeddingClient | undefined;
@@ -2134,13 +2250,18 @@ function openBrowser(url: string): void {
   child.unref();
 }
 
-// Initialize search on startup
-initializeSearch();
+// Main startup function
+async function startServer() {
+  // Check for existing instances before doing any initialization
+  await ensureSingleInstance();
 
-app.listen(PORT, () => {
-  const url = `http://localhost:${PORT}`;
+  // Initialize search (database, embeddings)
+  initializeSearch();
 
-  console.log(`
+  app.listen(PORT, () => {
+    const url = `http://localhost:${PORT}`;
+
+    console.log(`
 Claude Transcript Viewer running at ${url}
 
 Serving archive from: ${ARCHIVE_DIR}
@@ -2150,20 +2271,27 @@ Options:
   --no-open  Don't auto-open browser
 `);
 
-  // Auto-open browser unless disabled
-  if (!NO_OPEN && !isCI()) {
-    openBrowser(url);
-  }
+    // Auto-open browser unless disabled
+    if (!NO_OPEN && !isCI()) {
+      openBrowser(url);
+    }
 
-  // Start background archive generation and indexing after server is ready (non-blocking)
-  if (SOURCE_DIR) {
-    setTimeout(async () => {
-      // First generate HTML archive from JSONL files
-      await generateArchive();
-      // Then index for search
-      await startBackgroundIndexing();
-    }, 1000);
-  }
+    // Start background archive generation and indexing after server is ready (non-blocking)
+    if (SOURCE_DIR) {
+      setTimeout(async () => {
+        // First generate HTML archive from JSONL files
+        await generateArchive();
+        // Then index for search
+        await startBackgroundIndexing();
+      }, 1000);
+    }
+  });
+}
+
+// Start the server
+startServer().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
 });
 
 // Graceful shutdown
