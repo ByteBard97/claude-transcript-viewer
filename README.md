@@ -5,7 +5,8 @@ A web server for browsing and searching Claude Code conversation transcripts wit
 ## Features
 
 - **Semantic Search** - Hybrid FTS + vector search with highlighted snippets
-- **Auto Archive Generation** - Automatically generates HTML from JSONL transcripts on startup
+- **MLX Embeddings** - Auto-starts Qwen3 embedding server on Apple Silicon
+- **Auto Archive Generation** - Generates HTML from JSONL transcripts on startup
 - **Background Indexing** - Non-blocking indexing of conversations for search
 - **Enhanced Viewing** - Collapsible cells, preview text, infinite scroll
 - **Search Everywhere** - Search bar on every page with live dropdown results
@@ -14,71 +15,111 @@ A web server for browsing and searching Claude Code conversation transcripts wit
 ## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+# Run with npx (no installation required)
+npx claude-transcript-viewer ~/claude-archive
 
-# Start with auto-generation (recommended)
-SOURCE_DIR=~/.claude/projects npm run dev
-
-# Or specify output directory
-ARCHIVE_DIR=./archive SOURCE_DIR=~/.claude/projects npm run dev
+# Or with live indexing from Claude Code transcripts
+npx claude-transcript-viewer ~/claude-archive ~/.claude/projects
 ```
 
-Open http://localhost:3000 to browse transcripts.
+Open http://localhost:3000 to browse transcripts. The browser opens automatically.
+
+## Understanding the Directories
+
+The viewer uses two directories that serve different purposes:
+
+### Archive Directory (required)
+
+The **archive directory** contains pre-rendered HTML files for browsing. This is where the viewer serves content from and stores its search database.
+
+```
+~/claude-archive/                 # Your archive directory
+├── cohouser/                     # Project folders
+│   ├── abc123.html              # Rendered conversation
+│   └── def456.html
+├── tools/
+│   └── ghi789.html
+└── .search.db                    # SQLite search index (auto-created)
+```
+
+### Source Directory (optional)
+
+The **source directory** points to raw Claude Code JSONL transcripts. When provided, the viewer can:
+- Watch for new/modified transcripts
+- Auto-generate HTML archives
+- Keep the search index updated
+
+```
+~/.claude/projects/               # Claude Code's default location
+├── -Users-me-projects-cohouser/
+│   ├── abc123.jsonl             # Raw transcript files
+│   └── def456.jsonl
+└── -Users-me-projects-tools/
+    └── ghi789.jsonl
+```
+
+### Usage Modes
+
+**Read-only mode** - Browse an existing HTML archive:
+```bash
+npx claude-transcript-viewer ~/claude-archive
+```
+
+**Live mode** - Auto-generate archive from transcripts and keep it updated:
+```bash
+npx claude-transcript-viewer ~/claude-archive ~/.claude/projects
+```
 
 ## Installation
 
+### Via npx (recommended)
+
+No installation required:
+
 ```bash
-git clone <repo>
+npx claude-transcript-viewer ~/claude-archive
+```
+
+### Via npm global install
+
+```bash
+npm install -g claude-transcript-viewer
+claude-transcript-viewer ~/claude-archive
+```
+
+### From source
+
+```bash
+git clone https://github.com/varunr89/claude-transcript-viewer.git
 cd claude-transcript-viewer
 npm install
+npm run dev -- ~/claude-archive
 ```
 
 ### Requirements
 
-- Node.js 18+
+- Node.js 20+
+- Python 3.9+ (for MLX embeddings on Apple Silicon)
 - [claude-code-transcripts](https://github.com/simonw/claude-code-transcripts) Python CLI (for HTML generation)
 
 ```bash
-# Install the Python CLI
+# Install the Python CLI for HTML generation
 pip install claude-code-transcripts
-# or
-uv pip install claude-code-transcripts
 ```
 
-## Usage
+## CLI Options
 
-### Basic Usage
-
-```bash
-# Auto-generate archive and start server
-SOURCE_DIR=~/.claude/projects npm run dev
-
-# Use existing archive (no generation)
-npm run dev -- /path/to/existing/archive
-
-# Specify all paths explicitly
-ARCHIVE_DIR=./archive \
-SOURCE_DIR=~/.claude/projects \
-DATABASE_PATH=./search.db \
-npm run dev
 ```
+Usage: claude-transcript-viewer [archive-dir] [source-dir] [options]
 
-### Manual Indexing
+Arguments:
+  archive-dir    Path to the HTML archive directory (default: ./claude-archive)
+  source-dir     Path to Claude Code transcripts for live indexing (optional)
 
-If you only want to index without running the server:
-
-```bash
-npm run index ~/.claude/projects ./search.db
-```
-
-### With Embedding Server
-
-For semantic vector search (optional), run a compatible embedding server:
-
-```bash
-# Start embedding server (e.g., qwen3-embeddings-mlx)
-EMBED_SOCKET=/tmp/qwen-embed.sock npm run dev
+Options:
+  --no-open      Don't auto-open browser on startup
+  --help, -h     Show help message
+  --version, -v  Show version number
 ```
 
 ## Configuration
@@ -89,7 +130,30 @@ EMBED_SOCKET=/tmp/qwen-embed.sock npm run dev
 | `ARCHIVE_DIR` | `./claude-archive` | Directory for HTML files |
 | `SOURCE_DIR` | (none) | JSONL source directory (enables auto-generation) |
 | `DATABASE_PATH` | `ARCHIVE_DIR/.search.db` | SQLite database path |
+| `EMBED_URL` | (none) | External embedding server URL |
 | `EMBED_SOCKET` | `/tmp/qwen-embed.sock` | Unix socket for embedding server |
+| `NO_OPEN` | `false` | Set to `true` to disable auto-open browser |
+| `DEBUG` | `false` | Set to `true` for verbose logging |
+
+## Embedding Server
+
+The viewer supports semantic vector search via embeddings. On **Apple Silicon Macs**, an MLX-accelerated Qwen3 embedding server starts automatically. On other platforms, FTS (full-text search) is used as a fallback.
+
+### Automatic (Apple Silicon)
+
+No configuration needed. The server auto-starts with:
+- Model: `mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ`
+- Dimensions: 1024
+- First run downloads the model (~400MB)
+
+### External Server
+
+For non-Apple systems or custom embeddings:
+
+```bash
+# Point to an external embedding server
+EMBED_URL=http://localhost:8000 npx claude-transcript-viewer ~/archive
+```
 
 ## API Endpoints
 
