@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import express, { Request, Response } from "express";
-import { readFileSync, existsSync, readdirSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync, mkdirSync, accessSync, constants } from "fs";
 import { join, dirname, resolve } from "path";
 import { spawn } from "child_process";
 import * as cheerio from "cheerio";
@@ -16,14 +16,116 @@ import {
 } from "./embeddings/server-manager.js";
 import { getConfig } from "./config.js";
 import { runIndexer } from "./indexer/index.js";
+import { fileURLToPath } from "url";
+
+// Get package version for --version flag
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+function getPackageVersion(): string {
+  try {
+    // Try dist location first (when installed via npm)
+    let pkgPath = join(__dirname, "..", "package.json");
+    if (!existsSync(pkgPath)) {
+      // Fallback to source location
+      pkgPath = join(__dirname, "..", "..", "package.json");
+    }
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    return pkg.version || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+// CLI flag handling - process before any other initialization
+const args = process.argv.slice(2);
+const showHelp = args.includes("--help") || args.includes("-h");
+const showVersion = args.includes("--version") || args.includes("-v");
+
+if (showVersion) {
+  console.log(`claude-transcript-viewer v${getPackageVersion()}`);
+  process.exit(0);
+}
+
+if (showHelp) {
+  console.log(`
+claude-transcript-viewer v${getPackageVersion()}
+
+Usage: claude-transcript-viewer [archive-dir] [source-dir] [options]
+
+Arguments:
+  archive-dir    Path to the HTML archive directory (default: ./claude-archive)
+  source-dir     Path to Claude Code transcripts for live indexing (optional)
+
+Options:
+  --no-open      Don't auto-open browser on startup
+  --help, -h     Show this help message
+  --version, -v  Show version number
+
+Environment Variables:
+  PORT           Server port (default: 3000)
+  ARCHIVE_DIR    Override archive directory path
+  SOURCE_DIR     Override source directory path
+  DATABASE_PATH  Override database file path
+  EMBED_URL      Embedding server URL (e.g., http://localhost:8000)
+  EMBED_SOCKET   Unix socket path for embedding server
+  NO_OPEN        Set to "true" to disable auto-open browser
+  DEBUG          Set to "true" for verbose logging
+
+Examples:
+  npx claude-transcript-viewer ~/claude-archive
+  npx claude-transcript-viewer ~/archive ~/transcripts --no-open
+  EMBED_URL=http://localhost:8000 npx claude-transcript-viewer ~/archive
+`);
+  process.exit(0);
+}
+
+// Filter out flags to get positional arguments
+const positionalArgs = args.filter(arg => !arg.startsWith("-"));
+const ARCHIVE_DIR_ARG = positionalArgs[0];
+const SOURCE_DIR_ARG = positionalArgs[1];
 
 const app = express();
 const config = getConfig();
 const PORT = process.env.PORT || 3000;
-const ARCHIVE_DIR = process.env.ARCHIVE_DIR || process.argv[2] || "./claude-archive";
-const SOURCE_DIR = process.env.SOURCE_DIR || process.argv[3] || "";
+const ARCHIVE_DIR = process.env.ARCHIVE_DIR || ARCHIVE_DIR_ARG || "./claude-archive";
+const SOURCE_DIR = process.env.SOURCE_DIR || SOURCE_DIR_ARG || "";
 const DATABASE_PATH = process.env.DATABASE_PATH || join(ARCHIVE_DIR, ".search.db");
-const NO_OPEN = process.argv.includes("--no-open") || process.env.NO_OPEN === "true";
+const NO_OPEN = args.includes("--no-open") || process.env.NO_OPEN === "true";
+
+// Validate ARCHIVE_DIR before proceeding
+function validateArchiveDir(): void {
+  // Resolve to absolute path for clearer error messages
+  const resolvedPath = resolve(ARCHIVE_DIR);
+
+  if (!existsSync(resolvedPath)) {
+    console.error(`Error: Archive directory does not exist: ${resolvedPath}`);
+    console.error(`\nCreate the directory or specify a valid path:`);
+    console.error(`  npx claude-transcript-viewer /path/to/your/archive`);
+    console.error(`\nRun with --help for more options.`);
+    process.exit(1);
+  }
+
+  try {
+    accessSync(resolvedPath, constants.R_OK);
+  } catch {
+    console.error(`Error: Archive directory is not readable: ${resolvedPath}`);
+    console.error(`Check file permissions and try again.`);
+    process.exit(1);
+  }
+
+  // Verify it's actually a directory
+  try {
+    const entries = readdirSync(resolvedPath, { withFileTypes: true });
+    // Just check we can read it - entries can be empty for a new archive
+  } catch (err) {
+    console.error(`Error: Cannot read archive directory: ${resolvedPath}`);
+    console.error(`${err}`);
+    process.exit(1);
+  }
+}
+
+// Run validation immediately
+validateArchiveDir();
 
 // Initialize database and embedding client
 let embeddingClient: EmbeddingClient | undefined;
@@ -248,14 +350,25 @@ function buildProjectMapping() {
 }
 
 async function initializeSearch() {
+  // Database initialization is critical - exit on failure
   try {
     createDatabase(DATABASE_PATH);
     console.log(`Search database initialized at ${DATABASE_PATH}`);
+  } catch (err) {
+    console.error(`Failed to initialize search database at ${DATABASE_PATH}`);
+    console.error(`${err}`);
+    console.error(`\nThis may indicate:`);
+    console.error(`  - The archive directory doesn't have write permissions`);
+    console.error(`  - The disk is full`);
+    console.error(`  - The database file is corrupted (try deleting .search.db)`);
+    process.exit(1);
+  }
 
-    // Build project to archive directory mapping
-    buildProjectMapping();
+  // Build project to archive directory mapping
+  buildProjectMapping();
 
-    // Try to connect to embedding server (HTTP URL or Unix socket)
+  // Embedding server initialization is optional - FTS fallback is acceptable
+  try {
     const embedUrl = process.env.EMBED_URL; // e.g., http://localhost:8000
     const socketPath = process.env.EMBED_SOCKET || "/tmp/qwen-embed.sock";
 
@@ -300,7 +413,9 @@ async function initializeSearch() {
       console.log(`  Set EMBED_URL=http://localhost:8000 for HTTP or EMBED_SOCKET for Unix socket`);
     }
   } catch (err) {
-    console.error("Failed to initialize search database:", err);
+    // Embedding failures are non-fatal - continue with FTS-only search
+    console.error(`Warning: Embedding initialization failed: ${err}`);
+    console.log(`Continuing with FTS-only search`);
   }
 }
 
