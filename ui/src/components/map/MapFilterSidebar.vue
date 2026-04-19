@@ -2,6 +2,7 @@
   <aside
     class="w-72 bg-surface-container-low h-full flex flex-col shrink-0 border-r border-outline-variant/10 z-30"
     aria-label="Map filters"
+    data-testid="map-filter-sidebar"
   >
     <div class="p-6 flex-1">
       <h2 class="text-[10px] font-bold uppercase tracking-[0.05em] text-on-surface-variant mb-6">
@@ -75,6 +76,7 @@
     <div class="p-4 border-t border-outline-variant/10">
       <button
         class="w-full btn-gradient text-on-primary-container py-2 rounded font-medium text-sm hover:brightness-105 active:brightness-95 transition-all duration-150"
+        data-testid="apply-layout-button"
         @click="emit('apply', { selectedProjects, dateFrom, dateTo })"
       >
         Apply Layout

@@ -14,6 +14,7 @@
             placeholder="Search semantic space..."
             type="text"
             aria-label="Search semantic space"
+            data-testid="map-search-input"
           />
           <span class="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider bg-surface-container-highest px-2 py-1 rounded mr-2">
             CMD K
@@ -23,10 +24,11 @@
 
       <!-- 2D / 3D toggle -->
       <div class="absolute top-6 right-6 z-20 flex items-center gap-2">
-        <div class="flex bg-surface-container-high/80 backdrop-blur-md rounded outline outline-1 outline-outline-variant/15 p-1">
+        <div class="flex bg-surface-container-high/80 backdrop-blur-md rounded outline outline-1 outline-outline-variant/15 p-1" data-testid="dimension-toggle">
           <button
             class="px-3 py-1 rounded text-xs font-bold transition-colors"
             :class="plotMode === '2d' ? 'bg-surface-variant text-on-surface' : 'text-on-surface-variant hover:text-on-surface'"
+            aria-label="2D view"
             @click="plotMode = '2d'"
           >
             2D
@@ -34,6 +36,7 @@
           <button
             class="px-3 py-1 rounded text-xs font-bold transition-colors"
             :class="plotMode === '3d' ? 'bg-surface-variant text-on-surface' : 'text-on-surface-variant hover:text-on-surface'"
+            aria-label="3D view"
             @click="plotMode = '3d'"
           >
             3D

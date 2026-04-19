@@ -6,7 +6,7 @@
   >
     <div class="flex justify-between items-start mb-4">
       <div>
-        <h3 class="text-base font-semibold text-on-surface mb-1">{{ result.title }}</h3>
+        <h3 class="text-base font-semibold text-on-surface mb-1">{{ cleanTitle }}</h3>
         <div class="flex items-center gap-2 text-xs">
           <span class="px-2 py-0.5 rounded-sm font-bold tracking-wider" :class="projectBadgeClass">
             {{ projectLabel }}
@@ -71,8 +71,12 @@ const formattedDate = computed(() => {
 
 const cleanSnippet = computed(() => {
   const s = props.result.snippet ?? ''
-  return s.replace(/<[^>]+>/g, '').trim()
+  return s.replace(/<[^>]+>/g, '').replace(/\*\*([^*]+)\*\*/g, '$1').trim()
 })
+
+const cleanTitle = computed(() =>
+  props.result.title.replace(/\*\*([^*]+)\*\*/g, '$1').trim()
+)
 
 const snippetFilename = computed(() => {
   const match = props.result.snippet?.match(/```(\w[\w.]+)/)
